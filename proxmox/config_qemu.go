@@ -71,7 +71,6 @@ func (config ConfigQemu) CreateVm(vmr *VmRef, client *Client) (err error) {
 		"vmid":        vmr.vmId,
 		"name":        config.Name,
 		"onboot":      config.Onboot,
-		"agent":       config.Agent,
 		"ide2":        config.QemuIso + ",media=cdrom",
 		"ostype":      config.QemuOs,
 		"sockets":     config.QemuSockets,
@@ -86,6 +85,10 @@ func (config ConfigQemu) CreateVm(vmr *VmRef, client *Client) (err error) {
 
 	// Create networks config.
 	config.CreateQemuNetworksParams(vmr.vmId, params)
+
+	if config.Agent != "" {
+		params["agent"] = config.Agent
+	}
 
 	exitStatus, err := client.CreateQemuVm(vmr.node, params)
 	if err != nil {
@@ -148,7 +151,6 @@ func (config ConfigQemu) UpdateConfig(vmr *VmRef, client *Client) (err error) {
 		"name":        config.Name,
 		"description": config.Description,
 		"onboot":      config.Onboot,
-		"agent":       config.Agent,
 		"sockets":     config.QemuSockets,
 		"cores":       config.QemuCores,
 		"memory":      config.Memory,
@@ -185,6 +187,9 @@ func (config ConfigQemu) UpdateConfig(vmr *VmRef, client *Client) (err error) {
 	}
 	if config.Ipconfig1 != "" {
 		configParams["ipconfig1"] = config.Ipconfig1
+	}
+	if config.Agent != "" {
+        configParams["agent"] = config.Agent
 	}
 	_, err = client.SetVmConfig(vmr, configParams)
 	return err
@@ -251,7 +256,7 @@ func NewConfigQemuFromApi(vmr *VmRef, client *Client) (config *ConfigQemu, err e
 	if _, isSet := vmConfig["onboot"]; isSet {
 		onboot = Itob(int(vmConfig["onboot"].(float64)))
 	}
-	agent := "1"
+	agent := "enabled=0,fstrim_cloned_disks=0"
 	if _, isSet := vmConfig["agent"]; isSet {
 		agent = vmConfig["agent"].(string)
 	}

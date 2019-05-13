@@ -30,19 +30,7 @@ func ParseSubConf(
 ) (key string, value interface{}) {
 	if strings.Contains(element, separator) {
 		conf := strings.Split(element, separator)
-		key, value := conf[0], conf[1]
-		var interValue interface{}
-
-		// Make sure to add value in right type,
-		// because all subconfig are returned as strings from Proxmox API.
-		if iValue, err := strconv.ParseInt(value, 10, 64); err == nil {
-			interValue = int(iValue)
-		} else if bValue, err := strconv.ParseBool(value); err == nil {
-			interValue = bValue
-		} else {
-			interValue = value
-		}
-		return key, interValue
+		return conf[0], conf[1]
 	}
 	return
 }

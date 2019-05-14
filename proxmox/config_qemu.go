@@ -81,7 +81,7 @@ func (config ConfigQemu) CreateVm(vmr *VmRef, client *Client) (err error) {
 	}
 
 	// Create disks config.
-	config.CreateQemuDisksParams(vmr.vmId, params, false)
+	config.CreateQemuDisksParams(vmr.vmId, params)
 
 	// Create networks config.
 	config.CreateQemuNetworksParams(vmr.vmId, params)
@@ -157,7 +157,7 @@ func (config ConfigQemu) UpdateConfig(vmr *VmRef, client *Client) (err error) {
 	}
 
 	// Create disks config.
-	config.CreateQemuDisksParams(vmr.vmId, configParams, true)
+	config.CreateQemuDisksParams(vmr.vmId, configParams)
 
 	// Create networks config.
 	config.CreateQemuNetworksParams(vmr.vmId, configParams)
@@ -589,11 +589,7 @@ func (c ConfigQemu) CreateQemuNetworksParams(vmID int, params map[string]interfa
 }
 
 // Create parameters for each disk.
-func (c ConfigQemu) CreateQemuDisksParams(
-	vmID int,
-	params map[string]interface{},
-	cloned bool,
-) error {
+func (c ConfigQemu) CreateQemuDisksParams(vmID int, params map[string]interface{}, ) error {
 
 	// For backward compatibility.
 	if len(c.QemuDisks) == 0 && len(c.Storage) > 0 {
@@ -620,10 +616,6 @@ func (c ConfigQemu) CreateQemuDisksParams(
 	// For new style with multi disk device.
 	for diskID, diskConfMap := range c.QemuDisks {
 
-		// skip the first disk for clones (may not always be right, but a template probably has at least 1 disk)
-		if diskID == 0 && cloned {
-			continue
-		}
 		diskConfParam := QemuDeviceParam{
 			"media=disk",
 		}
@@ -662,7 +654,7 @@ func (c ConfigQemu) CreateQemuDisksParams(
 		// Rest of config.
 		diskConfParam = diskConfParam.createDeviceParam(diskConfMap, ignoredKeys)
 
-		// Add back to Qemu prams.
+		// Add back to Qemu params.
 		params[qemuDiskName] = strings.Join(diskConfParam, ",")
 	}
 

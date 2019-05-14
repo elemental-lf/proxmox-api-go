@@ -23,18 +23,19 @@ type (
 
 // ConfigQemu - Proxmox API QEMU options
 type ConfigQemu struct {
-	Name         string      `json:"name"`
-	Description  string      `json:"desc"`
-	Onboot       bool        `json:"onboot"`
-	Agent        string      `json:"agent"`
-	Memory       int         `json:"memory"`
-	QemuOs       string      `json:"os"`
-	QemuCores    int         `json:"cores"`
-	QemuSockets  int         `json:"sockets"`
-	QemuIso      string      `json:"iso"`
-	FullClone    *int        `json:"fullclone"`
-	QemuDisks    QemuDevices `json:"disk"`
-	QemuNetworks QemuDevices `json:"network"`
+	Name             string      `json:"name"`
+	Description      string      `json:"desc"`
+	Onboot           bool        `json:"onboot"`
+	Agent            string      `json:"agent"`
+	Memory           int         `json:"memory"`
+	QemuOs           string      `json:"os"`
+	QemuCores        int         `json:"cores"`
+	QemuSockets      int         `json:"sockets"`
+	QemuIso          string      `json:"iso"`
+	FullClone        *int        `json:"fullclone"`
+	QemuScsiHardware string      `json:"scsihw"`
+	QemuDisks        QemuDevices `json:"disk"`
+	QemuNetworks     QemuDevices `json:"network"`
 
 	// Deprecated single disk.
 	DiskSize    float64 `json:"diskGB"`
@@ -82,6 +83,10 @@ func (config ConfigQemu) CreateVm(vmr *VmRef, client *Client) (err error) {
 
 	// Create disks config.
 	config.CreateQemuDisksParams(vmr.vmId, params)
+
+	if config.QemuScsiHardware != "" {
+		params["scsihw"] = config.QemuScsiHardware
+	}
 
 	// Create networks config.
 	config.CreateQemuNetworksParams(vmr.vmId, params)
@@ -158,6 +163,10 @@ func (config ConfigQemu) UpdateConfig(vmr *VmRef, client *Client) (err error) {
 
 	// Create disks config.
 	config.CreateQemuDisksParams(vmr.vmId, configParams)
+
+	if config.QemuScsiHardware != "" {
+		configParams["scsihw"] = config.QemuScsiHardware
+	}
 
 	// Create networks config.
 	config.CreateQemuNetworksParams(vmr.vmId, configParams)

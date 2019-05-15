@@ -506,16 +506,19 @@ func (c *Client) DeleteVmParams(vmr *VmRef, params map[string]interface{}) (exit
 }
 
 func (c *Client) CreateQemuVm(node string, vmParams map[string]interface{}) (exitStatus string, err error) {
+
+
 	// Create VM disks first to ensure disks names.
-	createdDisks, createdDisksErr := c.createVMDisks(node, vmParams)
-	if createdDisksErr != nil {
-		return "", createdDisksErr
+	createdDisks, err := c.createVMDisks(node, vmParams)
+	if err != nil {
+		return "", err
 	}
 
 	// Then create the VM itself.
 	reqbody := ParamsToBody(vmParams)
 	url := fmt.Sprintf("/nodes/%s/qemu", node)
 	var resp *http.Response
+	var taskResponse map[string]interface{}
 	resp, err = c.session.Post(url, nil, nil, &reqbody)
 	defer resp.Body.Close()
 	if err != nil {
@@ -523,23 +526,29 @@ func (c *Client) CreateQemuVm(node string, vmParams map[string]interface{}) (exi
 		// but extract the body if possible to give any error information back in the exitStatus
 		b, _ := ioutil.ReadAll(resp.Body)
 		exitStatus = string(b)
-		return exitStatus, err
+		goto errorDiskDelete
 	}
 
-	taskResponse, err := ResponseJSON(resp)
+	taskResponse, err = ResponseJSON(resp)
 	if err != nil {
-		return "", err
+		exitStatus = ""
+		goto errorDiskDelete
 	}
 	exitStatus, err = c.WaitForCompletion(taskResponse)
 	// Delete VM disks if the VM didn't create.
 	if exitStatus != "OK" {
-		deleteDisksErr := c.DeleteVMDisks(node, createdDisks)
-		if deleteDisksErr != nil {
-			return "", deleteDisksErr
-		}
+		goto errorDiskDelete
 	}
 
-	return
+	return exitStatus, nil
+
+errorDiskDelete:
+	err = c.DeleteVMDisks(node, createdDisks)
+	if err != nil {
+		return "", err
+	}
+
+	return exitStatus, err
 }
 
 func (c *Client) CreateLxcContainer(node string, vmParams map[string]interface{}) (exitStatus string, err error) {

@@ -23,7 +23,7 @@ func main() {
 		tlsconf = nil
 	}
 	c, _ := proxmox.NewClient(os.Getenv("PM_API_URL"), nil, tlsconf)
-	err := c.Login(os.Getenv("PM_USER"), os.Getenv("PM_PASS"))
+	err := c.Login(os.Getenv("PM_USER"), os.Getenv("PM_PASS"), os.Getenv("PM_OTP"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -59,10 +59,27 @@ func main() {
 
 	case "getConfig":
 		vmr = proxmox.NewVmRef(vmid)
-		config, err := proxmox.NewConfigQemuFromApi(vmr, c)
+		c.CheckVmRef(vmr)
+		vmType := vmr.GetVmType()
+		var config interface{}
+		var err error
+		if vmType == "qemu" {
+			config, err = proxmox.NewConfigQemuFromApi(vmr, c)
+		} else if vmType == "lxc" {
+			config, err = proxmox.NewConfigLxcFromApi(vmr, c)
+		}
 		failError(err)
 		cj, err := json.MarshalIndent(config, "", "  ")
 		log.Println(string(cj))
+
+	case "getNetworkInterfaces":
+		vmr = proxmox.NewVmRef(vmid)
+		c.CheckVmRef(vmr)
+		networkInterfaces, err := c.GetVmAgentNetworkInterfaces(vmr)
+		failError(err)
+
+		networkInterfaceJson, err := json.Marshal(networkInterfaces)
+		fmt.Println(string(networkInterfaceJson))
 
 	case "createQemu":
 		config, err := proxmox.NewConfigQemuFromJson(os.Stdin)
@@ -70,6 +87,14 @@ func main() {
 		vmr = proxmox.NewVmRef(vmid)
 		vmr.SetNode(flag.Args()[2])
 		failError(config.CreateVm(vmr, c))
+		log.Println("Complete")
+
+	case "createLxc":
+		config, err := proxmox.NewConfigLxcFromJson(os.Stdin)
+		failError(err)
+		vmr = proxmox.NewVmRef(vmid)
+		vmr.SetNode(flag.Args()[2])
+		failError(config.CreateLxc(vmr, c))
 		log.Println("Complete")
 
 	case "installQemu":
@@ -120,8 +145,10 @@ func main() {
 			log.Fatal("Can't find template")
 			return
 		}
-		nextid, err := c.GetNextID(0)
-		vmr = proxmox.NewVmRef(nextid)
+		if vmid == 0 {
+			vmid, err = c.GetNextID(0)
+		}
+		vmr = proxmox.NewVmRef(vmid)
 		vmr.SetNode(flag.Args()[2])
 		log.Print("Creating node: ")
 		log.Println(vmr)
@@ -150,6 +177,18 @@ func main() {
 		err = proxmox.SendKeysString(vmr, c, flag.Args()[2])
 		failError(err)
 		log.Println("Keys sent")
+
+	case "nextid":
+		id, err := c.NextId()
+		failError(err)
+		log.Printf("Getting Next Free ID: %d\n", id)
+
+	case "checkid":
+		i, err := strconv.Atoi(flag.Args()[1])
+		failError(err)
+		id, err := c.VMIdExists(i)
+		failError(err)
+		log.Printf("Selected ID is free: %d\n", id)
 
 	default:
 		fmt.Printf("unknown action, try start|stop vmid")

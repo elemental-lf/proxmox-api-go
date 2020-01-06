@@ -19,6 +19,7 @@ go build -o proxmox-api-go
 export PM_API_URL="https://xxxx.com:8006/api2/json"
 export PM_USER=user@pam
 export PM_PASS=password
+export PM_OTP=otpcode (only if required)
 
 ./proxmox-api-go installQemu proxmox-node-name < qemu1.json
 
@@ -46,25 +47,26 @@ createQemu JSON Sample:
   "sockets": 1,
   "iso": "local:iso/ubuntu-14.04.5-server-amd64.iso",
   "disk": {
-    0: {
+    "0": {
       "type": "virtio",
       "storage": "local",
       "storage_type": "dir",
       "size": "30G",
       "backup": true
+    }
   },
   "network": {
-    0: {
+    "0": {
       "model": "virtio",
       "bridge": "nat"
     },
-    1: {
+    "1": {
       "model": "virtio",
       "bridge": "vmbr0",
       "firwall": true,
       "backup": true,
       "tag": -1
-    },
+    }
   }
 }
 ```
@@ -106,6 +108,7 @@ See: https://pve.proxmox.com/wiki/Cloud-Init_Support
 
 * ciuser - User name to change ssh keys and password for instead of the image’s configured default user.
 * cipassword - Password to assign the user. 
+* cicustom - Specify custom files to replace the automatically generated ones at start.
 * searchdomain - Sets DNS search domains for a container.
 * nameserver - Sets DNS server IP address for a container.
 * sshkeys - public ssh keys, one per line

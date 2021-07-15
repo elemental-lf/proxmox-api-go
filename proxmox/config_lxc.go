@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"strconv"
 	"strings"
 )
 
 // LXC options for the Proxmox API
-type configLxc struct {
+type ConfigLxc struct {
 	Ostemplate         string      `json:"ostemplate"`
 	Arch               string      `json:"arch"`
 	BWLimit            int         `json:"bwlimit,omitempty"`
@@ -22,6 +21,7 @@ type configLxc struct {
 	Description        string      `json:"description,omitempty"`
 	Features           QemuDevice  `json:"features,omitempty"`
 	Force              bool        `json:"force,omitempty"`
+	HaState            string      `json:"hastate,omitempty"`
 	Hookscript         string      `json:"hookscript,omitempty"`
 	Hostname           string      `json:"hostname,omitempty"`
 	IgnoreUnpackErrors bool        `json:"ignore-unpack-errors,omitempty"`
@@ -36,7 +36,7 @@ type configLxc struct {
 	Pool               string      `json:"pool,omitempty"`
 	Protection         bool        `json:"protection"`
 	Restore            bool        `json:"restore,omitempty"`
-	RootFs             string      `json:"rootfs,omitempty"`
+	RootFs             QemuDevice  `json:"rootfs,omitempty"`
 	SearchDomain       string      `json:"searchdomain,omitempty"`
 	SSHPublicKeys      string      `json:"ssh-public-keys,omitempty"`
 	Start              bool        `json:"start"`
@@ -47,11 +47,12 @@ type configLxc struct {
 	Tty                int         `json:"tty"`
 	Unique             bool        `json:"unique,omitempty"`
 	Unprivileged       bool        `json:"unprivileged"`
+	Tags               string      `json:"tags"`
 	Unused             []string    `json:"unused,omitempty"`
 }
 
-func NewConfigLxc() configLxc {
-	return configLxc{
+func NewConfigLxc() ConfigLxc {
+	return ConfigLxc{
 		Arch:         "amd64",
 		CMode:        "tty",
 		Console:      true,
@@ -69,23 +70,17 @@ func NewConfigLxc() configLxc {
 	}
 }
 
-func NewConfigLxcFromJson(io io.Reader) (config configLxc, err error) {
+func NewConfigLxcFromJson(io io.Reader) (config ConfigLxc, err error) {
 	config = NewConfigLxc()
 	err = json.NewDecoder(io).Decode(config)
-	if err != nil {
-		log.Fatal(err)
-		return config, err
-	}
-	log.Println(config)
-	return
+	return config, err
 }
 
-func NewConfigLxcFromApi(vmr *VmRef, client *Client) (config *configLxc, err error) {
+func NewConfigLxcFromApi(vmr *VmRef, client *Client) (config *ConfigLxc, err error) {
 	// prepare json map to receive the information from the api
 	var lxcConfig map[string]interface{}
 	lxcConfig, err = client.GetVmConfig(vmr)
 	if err != nil {
-		log.Fatal(err)
 		return nil, err
 	}
 
@@ -106,7 +101,7 @@ func NewConfigLxcFromApi(vmr *VmRef, client *Client) (config *configLxc, err err
 	if _, isSet := lxcConfig["console"]; isSet {
 		console = Itob(int(lxcConfig["console"].(float64)))
 	}
-	cores := 1
+	cores := 0
 	if _, isSet := lxcConfig["cores"]; isSet {
 		cores = int(lxcConfig["cores"].(float64))
 	}
@@ -141,6 +136,10 @@ func NewConfigLxcFromApi(vmr *VmRef, client *Client) (config *configLxc, err err
 		}
 	}
 
+	hastate := ""
+	if _, isSet := lxcConfig["hastate"]; isSet {
+		hastate = lxcConfig["hastate"].(string)
+	}
 	hookscript := ""
 	if _, isSet := lxcConfig["hookscript"]; isSet {
 		hookscript = lxcConfig["hookscript"].(string)
@@ -158,6 +157,12 @@ func NewConfigLxcFromApi(vmr *VmRef, client *Client) (config *configLxc, err err
 		memory = int(lxcConfig["memory"].(float64))
 	}
 
+	// add rootfs
+	rootfs := QemuDevice{}
+	if rootfsStr, isSet := lxcConfig["rootfs"]; isSet {
+		rootfs = ParsePMConf(rootfsStr.(string), "volume")
+	}
+
 	// add mountpoints
 	mpNames := []string{}
 
@@ -168,17 +173,14 @@ func NewConfigLxcFromApi(vmr *VmRef, client *Client) (config *configLxc, err err
 	}
 
 	for _, mpName := range mpNames {
-		mpConfStr := lxcConfig[mpName]
-		mpConfList := strings.Split(mpConfStr.(string), ",")
+		mpConfStr := lxcConfig[mpName].(string)
+		mpConfMap := ParseLxcDisk(mpConfStr)
 
+		// add mp id
 		id := rxDeviceID.FindStringSubmatch(mpName)
 		mpID, _ := strconv.Atoi(id[0])
-		// add mp id
-		mpConfMap := QemuDevice{
-			"id": mpID,
-		}
-		// add rest of device config
-		mpConfMap.readDeviceConfig(mpConfList)
+		mpConfMap["slot"] = mpID
+
 		// prepare empty mountpoint map
 		if config.Mountpoints == nil {
 			config.Mountpoints = QemuDevices{}
@@ -215,6 +217,13 @@ func NewConfigLxcFromApi(vmr *VmRef, client *Client) (config *configLxc, err err
 		}
 		// add rest of device config
 		nicConfMap.readDeviceConfig(nicConfList)
+
+		if nicConfMap["firewall"] == 1 {
+			nicConfMap["firewall"] = true
+		} else if nicConfMap["firewall"] == 0 {
+			nicConfMap["firewall"] = false
+		}
+
 		// prepare empty network map
 		if config.Networks == nil {
 			config.Networks = QemuDevices{}
@@ -236,10 +245,6 @@ func NewConfigLxcFromApi(vmr *VmRef, client *Client) (config *configLxc, err err
 	protection := false
 	if _, isSet := lxcConfig["protection"]; isSet {
 		protection = Itob(int(lxcConfig["protection"].(float64)))
-	}
-	rootfs := ""
-	if _, isSet := lxcConfig["rootfs"]; isSet {
-		rootfs = lxcConfig["rootfs"].(string)
 	}
 	searchdomain := ""
 	if _, isSet := lxcConfig["searchdomain"]; isSet {
@@ -265,6 +270,10 @@ func NewConfigLxcFromApi(vmr *VmRef, client *Client) (config *configLxc, err err
 	if _, isset := lxcConfig["unprivileged"]; isset {
 		unprivileged = Itob(int(lxcConfig["unprivileged"].(float64)))
 	}
+	tags := ""
+	if _, isSet := lxcConfig["tags"]; isSet {
+		tags = lxcConfig["tags"].(string)
+	}
 	var unused []string
 	if _, isset := lxcConfig["unused"]; isset {
 		unused = lxcConfig["unused"].([]string)
@@ -278,6 +287,7 @@ func NewConfigLxcFromApi(vmr *VmRef, client *Client) (config *configLxc, err err
 	config.CPUUnits = cpuunits
 	config.Description = description
 	config.OnBoot = onboot
+	config.HaState = hastate
 	config.Hookscript = hookscript
 	config.Hostname = hostname
 	config.Lock = lock
@@ -294,128 +304,35 @@ func NewConfigLxcFromApi(vmr *VmRef, client *Client) (config *configLxc, err err
 	config.Tty = tty
 	config.Unprivileged = unprivileged
 	config.Unused = unused
+	config.Tags = tags
 
 	return
 }
 
 // create LXC container using the Proxmox API
-func (config configLxc) CreateLxc(vmr *VmRef, client *Client) (err error) {
+func (config ConfigLxc) CreateLxc(vmr *VmRef, client *Client) (err error) {
 	vmr.SetVmType("lxc")
-
-	// convert config to map
-	params, _ := json.Marshal(&config)
-	var paramMap map[string]interface{}
-	json.Unmarshal(params, &paramMap)
-
-	// build list of features
-	// add features as parameter list to lxc parameters
-	// this overwrites the orginal formatting with a
-	// comma separated list of "key=value" pairs
-	featuresParam := QemuDeviceParam{}
-	featuresParam = featuresParam.createDeviceParam(config.Features, nil)
-	paramMap["features"] = strings.Join(featuresParam, ",")
-
-	// build list of mountpoints
-	// this does the same as for the feature list
-	// except that there can be multiple of these mountpoint sets
-	// and each mountpoint set comes with a new id
-	for mpID, mpConfMap := range config.Mountpoints {
-		mpConfParam := QemuDeviceParam{}
-		mpConfParam = mpConfParam.createDeviceParam(mpConfMap, nil)
-
-		// add mp to lxc parameters
-		mpName := fmt.Sprintf("mp%v", mpID)
-		paramMap[mpName] = strings.Join(mpConfParam, ",")
-	}
-
-	// build list of network parameters
-	for nicID, nicConfMap := range config.Networks {
-		nicConfParam := QemuDeviceParam{}
-		nicConfParam = nicConfParam.createDeviceParam(nicConfMap, nil)
-
-		// add nic to lxc parameters
-		nicName := fmt.Sprintf("net%v", nicID)
-		paramMap[nicName] = strings.Join(nicConfParam, ",")
-	}
-
-	// build list of unused volumes for sake of completenes,
-	// even if it is not recommended to change these volumes manually
-	for volID, vol := range config.Unused {
-		// add volume to lxc parameters
-		volName := fmt.Sprintf("unused%v", volID)
-		paramMap[volName] = vol
-	}
-
-	// now that we concatenated the key value parameter
-	// list for the networks, mountpoints and unused volumes,
-	// remove the original keys, since the Proxmox API does
-	// not know how to handle this key
-	delete(paramMap, "networks")
-	delete(paramMap, "mountpoints")
-	delete(paramMap, "unused")
+	paramMap := config.mapToAPIParams()
 
 	// amend vmid
 	paramMap["vmid"] = vmr.vmId
 
 	exitStatus, err := client.CreateLxcContainer(vmr.node, paramMap)
 	if err != nil {
-		return fmt.Errorf("Error creating LXC container: %v, error status: %s (params: %v)", err, exitStatus, params)
+		params, _ := json.Marshal(&paramMap)
+		return fmt.Errorf("Error creating LXC container: %v, error status: %s (params: %v)", err, exitStatus, string(params))
 	}
+
+	_, err = client.UpdateVMHA(vmr, config.HaState)
+	if err != nil {
+		return fmt.Errorf("[ERROR] %q", err)
+	}
+
 	return
 }
 
-func (config configLxc) UpdateConfig(vmr *VmRef, client *Client) (err error) {
-	// convert config to map
-	params, _ := json.Marshal(&config)
-	var paramMap map[string]interface{}
-	json.Unmarshal(params, &paramMap)
-
-	// build list of features
-	// add features as parameter list to lxc parameters
-	// this overwrites the orginal formatting with a
-	// comma separated list of "key=value" pairs
-	featuresParam := QemuDeviceParam{}
-	featuresParam = featuresParam.createDeviceParam(config.Features, nil)
-	paramMap["features"] = strings.Join(featuresParam, ",")
-
-	// build list of mountpoints
-	// this does the same as for the feature list
-	// except that there can be multiple of these mountpoint sets
-	// and each mountpoint set comes with a new id
-	for mpID, mpConfMap := range config.Mountpoints {
-		mpConfParam := QemuDeviceParam{}
-		mpConfParam = mpConfParam.createDeviceParam(mpConfMap, nil)
-
-		// add mp to lxc parameters
-		mpName := fmt.Sprintf("mp%v", mpID)
-		paramMap[mpName] = strings.Join(mpConfParam, ",")
-	}
-
-	// build list of network parameters
-	for nicID, nicConfMap := range config.Networks {
-		nicConfParam := QemuDeviceParam{}
-		nicConfParam = nicConfParam.createDeviceParam(nicConfMap, nil)
-
-		// add nic to lxc parameters
-		nicName := fmt.Sprintf("net%v", nicID)
-		paramMap[nicName] = strings.Join(nicConfParam, ",")
-	}
-
-	// build list of unused volumes for sake of completenes,
-	// even if it is not recommended to change these volumes manually
-	for volID, vol := range config.Unused {
-		// add volume to lxc parameters
-		volName := fmt.Sprintf("unused%v", volID)
-		paramMap[volName] = vol
-	}
-
-	// now that we concatenated the key value parameter
-	// list for the networks, mountpoints and unused volumes,
-	// remove the original keys, since the Proxmox API does
-	// not know how to handle this key
-	delete(paramMap, "networks")
-	delete(paramMap, "mountpoints")
-	delete(paramMap, "unused")
+func (config ConfigLxc) UpdateConfig(vmr *VmRef, client *Client) (err error) {
+	paramMap := config.mapToAPIParams()
 
 	// delete parameters wich are not supported in updated operations
 	delete(paramMap, "pool")
@@ -423,11 +340,94 @@ func (config configLxc) UpdateConfig(vmr *VmRef, client *Client) (err error) {
 	delete(paramMap, "password")
 	delete(paramMap, "ostemplate")
 	delete(paramMap, "start")
+
 	// even though it is listed as a PUT option in the API documentation
 	// we remove it here because "it should not be modified manually";
 	// also, error "500 unable to modify read-only option: 'unprivileged'"
 	delete(paramMap, "unprivileged")
 
+	_, err = client.UpdateVMHA(vmr, config.HaState)
+	if err != nil {
+		return err
+	}
+
 	_, err = client.SetLxcConfig(vmr, paramMap)
 	return err
+}
+
+func ParseLxcDisk(diskStr string) QemuDevice {
+	disk := ParsePMConf(diskStr, "volume")
+
+	// add features, if any
+	if mountoptions, isSet := disk["mountoptions"]; isSet {
+		moList := strings.Split(mountoptions.(string), ";")
+		moMap := map[string]bool{}
+		for _, mo := range moList {
+			moMap[mo] = true
+		}
+		disk["mountoptions"] = moMap
+	}
+
+	storageName, fileName := ParseSubConf(disk["volume"].(string), ":")
+	disk["storage"] = storageName
+	disk["file"] = fileName
+
+	return disk
+}
+
+func (config ConfigLxc) mapToAPIParams() map[string]interface{} {
+	// convert config to map
+	params, _ := json.Marshal(&config)
+	var paramMap map[string]interface{}
+	json.Unmarshal(params, &paramMap)
+
+	// build list of features
+	// add features as parameter list to lxc parameters
+	// this overwrites the orginal formatting with a
+	// comma separated list of "key=value" pairs
+	paramMap["features"] = formatDeviceParam(config.Features)
+
+	// format rootfs params as expected
+	if rootfs := config.RootFs; rootfs != nil {
+		paramMap["rootfs"] = FormatDiskParam(rootfs)
+	}
+
+	// build list of mountpoints
+	// this does the same as for the feature list
+	// except that there can be multiple of these mountpoint sets
+	// and each mountpoint set comes with a new id
+	for _, mpConfMap := range config.Mountpoints {
+		// add mp to lxc parameters
+		mpID := mpConfMap["slot"]
+		mpName := fmt.Sprintf("mp%v", mpID)
+		paramMap[mpName] = FormatDiskParam(mpConfMap)
+	}
+
+	// build list of network parameters
+	for nicID, nicConfMap := range config.Networks {
+		// add nic to lxc parameters
+		nicName := fmt.Sprintf("net%v", nicID)
+		paramMap[nicName] = formatDeviceParam(nicConfMap)
+	}
+
+	// build list of unused volumes for sake of completeness,
+	// even if it is not recommended to change these volumes manually
+	for volID, vol := range config.Unused {
+		// add volume to lxc parameters
+		volName := fmt.Sprintf("unused%v", volID)
+		paramMap[volName] = vol
+	}
+
+	// now that we concatenated the key value parameter
+	// list for the networks, mountpoints and unused volumes,
+	// remove the original keys, since the Proxmox API does
+	// not know how to handle this key
+	delete(paramMap, "networks")
+	delete(paramMap, "mountpoints")
+	delete(paramMap, "unused")
+
+	// also delete the hastate key which is used elsewhere
+	delete(paramMap, "hastate")
+
+	return paramMap
 }

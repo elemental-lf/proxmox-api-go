@@ -16,53 +16,64 @@ func main() {
 	var insecure *bool
 	insecure = flag.Bool("insecure", false, "TLS insecure mode")
 	proxmox.Debug = flag.Bool("debug", false, "debug mode")
+	taskTimeout := flag.Int("timeout", 300, "api task timeout in seconds")
 	fvmid := flag.Int("vmid", -1, "custom vmid (instead of auto)")
 	flag.Parse()
 	tlsconf := &tls.Config{InsecureSkipVerify: true}
 	if !*insecure {
 		tlsconf = nil
 	}
-	c, _ := proxmox.NewClient(os.Getenv("PM_API_URL"), nil, tlsconf)
+	c, _ := proxmox.NewClient(os.Getenv("PM_API_URL"), nil, tlsconf, *taskTimeout)
 	err := c.Login(os.Getenv("PM_USER"), os.Getenv("PM_PASS"), os.Getenv("PM_OTP"))
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	vmid := *fvmid
 	if vmid < 0 {
 		if len(flag.Args()) > 1 {
-			vmid, err = strconv.Atoi(flag.Args()[1])
+			vmid, err = strconv.Atoi(flag.Args()[len(flag.Args())-1])
 			if err != nil {
 				vmid = 0
 			}
-		} else if flag.Args()[0] == "idstatus" {
+		} else if len(flag.Args()) == 0 || (flag.Args()[0] == "idstatus") {
 			vmid = 0
 		}
 	}
 
 	var jbody interface{}
 	var vmr *proxmox.VmRef
+
+	if len(flag.Args()) == 0 {
+		fmt.Printf("Missing action, try start|stop vmid\n")
+		os.Exit(0)
+	}
+
 	switch flag.Args()[0] {
 	case "start":
 		vmr = proxmox.NewVmRef(vmid)
-		jbody, _ = c.StartVm(vmr)
+		jbody, err = c.StartVm(vmr)
+		failError(err)
 
 	case "stop":
 
 		vmr = proxmox.NewVmRef(vmid)
-		jbody, _ = c.StopVm(vmr)
+		jbody, err = c.StopVm(vmr)
+		failError(err)
 
 	case "destroy":
 		vmr = proxmox.NewVmRef(vmid)
 		jbody, err = c.StopVm(vmr)
 		failError(err)
-		jbody, _ = c.DeleteVm(vmr)
+		jbody, err = c.DeleteVm(vmr)
+		failError(err)
 
 	case "getConfig":
 		vmr = proxmox.NewVmRef(vmid)
-		c.CheckVmRef(vmr)
+		err := c.CheckVmRef(vmr)
+		failError(err)
 		vmType := vmr.GetVmType()
 		var config interface{}
-		var err error
 		if vmType == "qemu" {
 			config, err = proxmox.NewConfigQemuFromApi(vmr, c)
 		} else if vmType == "lxc" {
@@ -74,7 +85,8 @@ func main() {
 
 	case "getNetworkInterfaces":
 		vmr = proxmox.NewVmRef(vmid)
-		c.CheckVmRef(vmr)
+		err := c.CheckVmRef(vmr)
+		failError(err)
 		networkInterfaces, err := c.GetVmAgentNetworkInterfaces(vmr)
 		failError(err)
 
@@ -153,11 +165,38 @@ func main() {
 		log.Print("Creating node: ")
 		log.Println(vmr)
 		failError(config.CloneVm(sourceVmr, vmr, c))
+		failError(config.UpdateConfig(vmr, c))
 		log.Println("Complete")
 
+	case "createQemuSnapshot":
+		sourceVmr, err := c.GetVmRefByName(flag.Args()[1])
+		jbody, err = c.CreateQemuSnapshot(sourceVmr, flag.Args()[2])
+		failError(err)
+
+	case "deleteQemuSnapshot":
+		sourceVmr, err := c.GetVmRefByName(flag.Args()[1])
+		jbody, err = c.DeleteQemuSnapshot(sourceVmr, flag.Args()[2])
+		failError(err)
+
+	case "listQemuSnapshot":
+		sourceVmr, err := c.GetVmRefByName(flag.Args()[1])
+		jbody, _, err = c.ListQemuSnapshot(sourceVmr)
+		if rec, ok := jbody.(map[string]interface{}); ok {
+			temp := rec["data"].([]interface{})
+			for _, val := range temp {
+				snapshotName := val.(map[string]interface{})
+				if snapshotName["name"] != "current" {
+					fmt.Println(snapshotName["name"])
+				}
+			}
+		} else {
+			fmt.Printf("record not a map[string]interface{}: %v\n", jbody)
+		}
+		failError(err)
+
 	case "rollbackQemu":
-		vmr = proxmox.NewVmRef(vmid)
-		jbody, err = c.RollbackQemuVm(vmr, flag.Args()[2])
+		sourceVmr, err := c.GetVmRefByName(flag.Args()[1])
+		jbody, err = c.RollbackQemuVm(sourceVmr, flag.Args()[2])
 		failError(err)
 
 	case "sshforward":
@@ -179,7 +218,7 @@ func main() {
 		log.Println("Keys sent")
 
 	case "nextid":
-		id, err := c.NextId()
+		id, err := c.GetNextID(0)
 		failError(err)
 		log.Printf("Getting Next Free ID: %d\n", id)
 
@@ -190,8 +229,24 @@ func main() {
 		failError(err)
 		log.Printf("Selected ID is free: %d\n", id)
 
+	case "migrate":
+		vmr := proxmox.NewVmRef(vmid)
+		c.GetVmInfo(vmr)
+		args := flag.Args()
+		if len(args) <= 1 {
+			fmt.Printf("Missing target node\n")
+			os.Exit(1)
+		}
+		_, err := c.MigrateNode(vmr, args[1], true)
+
+		if err != nil {
+			log.Printf("Error to move %+v\n", err)
+			os.Exit(1)
+		}
+		log.Printf("VM %d is moved on %s\n", vmid, args[1])
+
 	default:
-		fmt.Printf("unknown action, try start|stop vmid")
+		fmt.Printf("unknown action, try start|stop vmid\n")
 	}
 	if jbody != nil {
 		log.Println(jbody)

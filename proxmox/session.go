@@ -28,6 +28,7 @@ type Session struct {
 	ApiUrl     string
 	AuthTicket string
 	CsrfToken  string
+	AuthToken  string // Combination of user, realm, token ID and UUID
 	Headers    http.Header
 }
 
@@ -65,7 +66,9 @@ func ParamsToBody(params map[string]interface{}) (body []byte) {
 		default:
 			v = fmt.Sprintf("%v", intrV)
 		}
-		vals.Set(k, v)
+		if v != "" {
+			vals.Set(k, v)
+		}
 	}
 	body = bytes.NewBufferString(vals.Encode()).Bytes()
 	return
@@ -104,6 +107,11 @@ func TypedResponse(resp *http.Response, v interface{}) error {
 		return fmt.Errorf("error unmarshalling result %v", err)
 	}
 	return nil
+}
+
+func (s *Session) SetAPIToken(userID, token string) {
+	auth := fmt.Sprintf("%s=%s", userID, token)
+	s.AuthToken = auth
 }
 
 func (s *Session) Login(username string, password string, otp string) (err error) {
@@ -148,7 +156,9 @@ func (s *Session) NewRequest(method, url string, headers *http.Header, body io.R
 	if headers != nil {
 		req.Header = *headers
 	}
-	if s.AuthTicket != "" {
+	if s.AuthToken != "" {
+		req.Header.Add("Authorization", "PVEAPIToken="+s.AuthToken)
+	} else if s.AuthTicket != "" {
 		req.Header.Add("Cookie", "PVEAuthCookie="+s.AuthTicket)
 		req.Header.Add("CSRFPreventionToken", s.CsrfToken)
 	}
@@ -167,10 +177,20 @@ func (s *Session) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	resp, err := s.httpClient.Do(req)
-
 	if err != nil {
 		return nil, err
 	}
+
+	// The response body reader needs to be closed, but lots of places call
+	// session.Do, and they might not be able to reliably close it themselves.
+	// Therefore, read the body out, close the original, then replace it with
+	// a NopCloser over the bytes, which does not need to be closed downsteam.
+	respBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body.Close()
+	resp.Body = ioutil.NopCloser(bytes.NewReader(respBody))
 
 	if *Debug {
 		dr, _ := httputil.DumpResponse(resp, true)

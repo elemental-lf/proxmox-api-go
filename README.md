@@ -1,21 +1,18 @@
 # Proxmox API Go
 
-
 Proxmox API in golang. For /api2/json. Work in progress.
 
-Starting with Proxmox 5.2 you can use clout-init options.
+Starting with Proxmox 5.2 you can use cloud-init options.
 
 ## Build
 
-```
+```sh
 go build -o proxmox-api-go
 ```
 
-
 ## Run
 
-
-```
+```sh
 export PM_API_URL="https://xxxx.com:8006/api2/json"
 export PM_USER=user@pam
 export PM_PASS=password
@@ -31,13 +28,22 @@ export PM_OTP=otpcode (only if required)
 
 ./proxmox-api-go cloneQemu template-name proxmox-node-name < clone1.json
 
-```
+./proxmox-api-go migrate pve1 123
 
+./proxmox-api-go createQemuSnapshot vm-name snapshot_name
+
+./proxmox-api-go deleteQemuSnapshot vm-name snapshot_name
+
+./proxmox-api-go listQemuSnapshot vm-name
+
+./proxmox-api-go rollbackQemu vm-name
+```
 
 ### Format
 
 createQemu JSON Sample:
-```
+
+```json
 {
   "name": "golang1.test.com",
   "desc": "Test proxmox-api-go",
@@ -70,10 +76,10 @@ createQemu JSON Sample:
   }
 }
 ```
-
  
 cloneQemu JSON Sample:
-```
+
+```json
 {
   "name": "golang2.test.com",
   "desc": "Test proxmox-api-go clone",
@@ -86,7 +92,8 @@ cloneQemu JSON Sample:
 ```
 
 cloneQemu cloud-init JSON Sample:
-```
+
+```json
 {
   "name": "cloudinit.test.com",
   "desc": "Test proxmox-api-go clone",
@@ -95,11 +102,10 @@ cloneQemu cloud-init JSON Sample:
   "cores": 2,
   "sockets": 1,
   "ipconfig0": "gw=10.0.2.2,ip=10.0.2.17/24",
-  "sshkey" : "...",
+  "sshkeys" : "...",
   "nameserver": "8.8.8.8"
 }
 ```
-
 
 ### Cloud-init options
 
@@ -124,3 +130,11 @@ Kickstart auto install
 * sshd (with preshared key/password)
 
 Network is temprorarily eth1 during the pre-provision phase.
+
+## Test
+
+You're going to need [vagrant](https://www.vagrantup.com/downloads) and [virtualbox](https://www.virtualbox.org/wiki/Downloads) to run the tests:
+
+```sh
+make test
+```

@@ -33,7 +33,7 @@ type ConfigQemu struct {
 	Pool            string      `json:"pool,omitempty"`
 	Bios            string      `json:"bios"`
 	Onboot          bool        `json:"onboot"`
-	Agent           int         `json:"agent"`
+	Agent           string      `json:"agent"`
 	Memory          int         `json:"memory"`
 	Balloon         int         `json:"balloon"`
 	QemuOs          string      `json:"os"`
@@ -512,15 +512,9 @@ func NewConfigQemuFromApi(vmr *VmRef, client *Client) (config *ConfigQemu, err e
 		onboot = Itob(int(vmConfig["onboot"].(float64)))
 	}
 
-	agent := 0
+	agent := "enabled=0,fstrim_cloned_disks=0"
 	if _, isSet := vmConfig["agent"]; isSet {
-		switch vmConfig["agent"].(type) {
-		case float64:
-			agent = int(vmConfig["agent"].(float64))
-		case string:
-			agent, _ = strconv.Atoi(vmConfig["agent"].(string))
-		}
-
+		agent = vmConfig["agent"].(string)
 	}
 	ostype := "other"
 	if _, isSet := vmConfig["ostype"]; isSet {
